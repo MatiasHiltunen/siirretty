@@ -1,15 +1,35 @@
 import express, { Router } from "express";
+import { db } from "./database/sqlite.js";
 
 const app = express();
 const router = Router();
 
 router.get('/user', (req, res)=>{
-    res.send('Kaikki käyttäjät haettu, count: 1234, page: 1, limit: 20')
+
+    db.all('SELECT * FROM user', [], (err, rows)=>{
+
+        if(err){
+            return res.status(404).send('Users not found')
+        }
+
+        res.send(JSON.stringify(rows))
+    })
+
 })
 
 router.get('/user/:id', (req, res)=>{
     const id = req.params.id
-    res.send("Käyttäjän tiedot id:llä: " + id)
+
+    db.get('SELECT * FROM user WHERE id = ?', [id], (err, row)=>{
+
+        if(err){
+            return res.status(404).send('User not found')
+        }
+
+        res.send(JSON.stringify(row))
+    })
+
+    // res.send("Käyttäjän tiedot id:llä: " + id)
 })
 
 router.post('/user', (req, res)=>{
