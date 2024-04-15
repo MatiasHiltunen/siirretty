@@ -1,19 +1,33 @@
 import express, { Router } from "express";
+import cookieParser from "cookie-parser";
 import { db } from "./database/sqlite.js";
-import { hash } from "bcrypt";
+import { compare, hash } from "bcrypt";
+import jwt from "jsonwebtoken";
+import crypto from 'crypto'
+import { JWT_SECRET } from "./src/config.js";
+import { authenticate } from "./src/middlewares/auth.js";
+
 
 const app = express();
 
 app.use(express.json())
+app.use(cookieParser())
 
 const router = Router();
 const saltRounds = 10
 
-router.get('/user', (req, res)=>{
 
-    db.all('SELECT * FROM user', [], (err, rows)=>{
+router.get('/user/account', authenticate, (req, res)=>{
 
-        if(err){
+    res.json(req.userData)
+
+})
+
+router.get('/user', authenticate, (req, res) => {
+
+    db.all('SELECT id, username, age FROM user', [], (err, rows) => {
+
+        if (err) {
             return res.status(404).send('Users not found')
         }
 
@@ -22,12 +36,12 @@ router.get('/user', (req, res)=>{
 
 })
 
-router.get('/user/:id', (req, res)=>{
+router.get('/user/:id', (req, res) => {
     const id = req.params.id
 
-    db.get('SELECT * FROM user WHERE id = ?', [id], (err, row)=>{
+    db.get('SELECT id, username, age FROM user WHERE id = ?', [id], (err, row) => {
 
-        if(err){
+        if (err) {
             return res.status(404).send('User not found')
         }
 
@@ -37,41 +51,41 @@ router.get('/user/:id', (req, res)=>{
     // res.send("Käyttäjän tiedot id:llä: " + id)
 })
 
-router.post('/user', async (req, res)=>{
-    const {username, password, age} = req.body
+router.post('/user', async (req, res) => {
+    const { username, password, age } = req.body
 
-    if(!username || !age || !password) {
+    if (!username || !age || !password) {
         return res.status(400).send("Tarkista tiedot")
-    } 
-    
+    }
+
     const hashedPassword = await hash(password, saltRounds)
 
-    db.serialize(()=>{
+    db.serialize(() => {
 
-        const stmt = db.prepare("INSERT INTO user VALUES (NULL, ?, ?, ?)")
-    
+        const stmt = db.prepare("INSERT INTO user VALUES (NULL, ?, ?, ?, NULL)")
+
         stmt.run(username, hashedPassword, age)
-    
+
         stmt.finalize()
-    
+
         res.status(201).send('Käyttäjä luotu onnistuneesti')
     })
-    
+
 
 })
 
 
 
-router.put('/user', (req, res)=>{
+router.put('/user', (req, res) => {
 
-    
-    const {username, age, id} = req.body
 
-    if(!username || !age || !id) {
+    const { username, age, id } = req.body
+
+    if (!username || !age || !id) {
         return res.status(400).send("Tarkista tiedot")
-    } 
+    }
 
-    db.serialize(()=>{
+    db.serialize(() => {
 
         const stmt = db.prepare("UPDATE user SET username = ?, age = ? WHERE id = ?")
 
@@ -83,16 +97,16 @@ router.put('/user', (req, res)=>{
     })
 })
 
-router.patch('/user', (req, res)=>{
+router.patch('/user', (req, res) => {
     res.send('Käyttäjän ikä päivitetty onnistuneesti')
 })
 
-router.delete('/user/:id', (req, res)=>{
+router.delete('/user/:id', (req, res) => {
     const id = req.params.id
 
-    db.run("DELETE FROM user WHERE id = ?", [id], (err)=>{
+    db.run("DELETE FROM user WHERE id = ?", [id], (err) => {
 
-        if(err){
+        if (err) {
             return res.status(404).send()
         }
 
@@ -102,10 +116,68 @@ router.delete('/user/:id', (req, res)=>{
 
 })
 
+
+
+router.post('/user/login', (req, res) => {
+
+    const { username, password } = req.body
+
+    if (!username || !password) {
+        return res.status(400).send()
+    }
+
+    db.get('SELECT id, username, age, password FROM user WHERE username = ?', [username], async (err, row) => {
+
+        if (err) {
+            return res.status(400).send()
+        }
+
+        const isAuthenticated = await compare(password, row.password)
+
+        if (isAuthenticated) {
+
+            const jti = crypto.randomUUID()
+
+
+
+            const token = jwt.sign({}, JWT_SECRET, {
+                expiresIn: '1h',
+                jwtid: jti
+            })
+
+            db.serialize(() => {
+
+                const stmt = db.prepare("UPDATE user SET jti = ? WHERE id = ?")
+
+                stmt.run(jti, row.id)
+
+                stmt.finalize()
+
+                res.cookie('accessToken', token, {
+                    httpOnly: true,
+                    sameSite: "lax",
+                    secure: true
+                })
+
+                // res.setHeader('Set-Cookie', 'accessToken=Bearer ' + token + "; HttpOnly;")
+
+                return res.send("Kirjautuminen onnistui")
+
+            })
+
+
+
+        } else {
+            return res.status(400).send()
+        }
+    })
+
+})
+
 app.use('/api/v1', router)
 
 app.use(express.static('public'))
 
-app.listen(3000, ()=>{
+app.listen(3000, () => {
     console.log('HTTP Server is running on port http://localhost:3000')
 })
