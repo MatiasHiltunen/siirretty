@@ -5,7 +5,7 @@ import { compare, hash } from "bcrypt";
 import jwt from "jsonwebtoken";
 import crypto from 'crypto'
 import { JWT_SECRET } from "./src/config.js";
-import { authenticate } from "./src/middlewares/auth.js";
+import { adminOnly, authenticate } from "./src/middlewares/auth.js";
 
 
 const app = express();
@@ -23,9 +23,9 @@ router.get('/user/account', authenticate, (req, res)=>{
 
 })
 
-router.get('/user', authenticate, (req, res) => {
+router.get('/user', authenticate, adminOnly, (req, res) => {
 
-    db.all('SELECT id, username, age FROM user', [], (err, rows) => {
+    db.all('SELECT id, username, age, role FROM user', [], (err, rows) => {
 
         if (err) {
             return res.status(404).send('Users not found')
@@ -39,7 +39,7 @@ router.get('/user', authenticate, (req, res) => {
 router.get('/user/:id', (req, res) => {
     const id = req.params.id
 
-    db.get('SELECT id, username, age FROM user WHERE id = ?', [id], (err, row) => {
+    db.get('SELECT id, username, age, role FROM user WHERE id = ?', [id], (err, row) => {
 
         if (err) {
             return res.status(404).send('User not found')
@@ -52,25 +52,38 @@ router.get('/user/:id', (req, res) => {
 })
 
 router.post('/user', async (req, res) => {
-    const { username, password, age } = req.body
+    const { username, password, age, role } = req.body
 
-    if (!username || !age || !password) {
+    if (!username || !age || !password || !role) {
         return res.status(400).send("Tarkista tiedot")
     }
 
     const hashedPassword = await hash(password, saltRounds)
 
-    db.serialize(() => {
+ 
 
-        const stmt = db.prepare("INSERT INTO user VALUES (NULL, ?, ?, ?, NULL)")
+    const stmt = db.prepare("INSERT INTO user VALUES (NULL, ?, ?, ?, NULL, ?)")
 
-        stmt.run(username, hashedPassword, age)
 
-        stmt.finalize()
+    stmt.run(username, hashedPassword, age, role, (err)=>{
 
+        if(err){
+            // Ei tehdä tuotantoympäristössä!
+           /*  return res.status(400).json({
+                error: err
+            }) */
+
+            return res.status(400).json({
+                error: "Kokeile toista käyttäjänimeä"
+            }) 
+        }
+
+        
         res.status(201).send('Käyttäjä luotu onnistuneesti')
+        
     })
-
+    
+  
 
 })
 
@@ -79,17 +92,17 @@ router.post('/user', async (req, res) => {
 router.put('/user', (req, res) => {
 
 
-    const { username, age, id } = req.body
+    const { username, age, id, role } = req.body
 
-    if (!username || !age || !id) {
+    if (!username || !age || !id || !role) {
         return res.status(400).send("Tarkista tiedot")
     }
 
     db.serialize(() => {
 
-        const stmt = db.prepare("UPDATE user SET username = ?, age = ? WHERE id = ?")
+        const stmt = db.prepare("UPDATE user SET username = ?, age = ?, role = ? WHERE id = ?")
 
-        stmt.run(username, age, id)
+        stmt.run(username, age, role, id)
 
         stmt.finalize()
 
@@ -126,9 +139,9 @@ router.post('/user/login', (req, res) => {
         return res.status(400).send()
     }
 
-    db.get('SELECT id, username, age, password FROM user WHERE username = ?', [username], async (err, row) => {
+    db.get('SELECT id, password, role FROM user WHERE username = ?', [username], async (err, row) => {
 
-        if (err) {
+        if (err || !row) {
             return res.status(400).send()
         }
 
@@ -140,7 +153,9 @@ router.post('/user/login', (req, res) => {
 
 
 
-            const token = jwt.sign({}, JWT_SECRET, {
+            const token = jwt.sign({
+                role: row
+            }, JWT_SECRET, {
                 expiresIn: '1h',
                 jwtid: jti
             })
