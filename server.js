@@ -17,7 +17,7 @@ router.post('/user', (req, res)=>{
 })
 
 router.put('/user', (req, res)=>{
-    res.send('Käyttäjä päivitetty onnistuneesti')
+    res.send('Käyttäjä päivitetty')
 })
 
 router.patch('/user', (req, res)=>{
